@@ -20,20 +20,24 @@ package org.apache.spark.sql.execution.datasources.greenplum
 import org.apache.spark.Partition
 import org.apache.spark.rdd.RDD
 import org.apache.spark.sql._
-import org.apache.spark.sql.execution.datasources.jdbc.{JDBCRDD, JdbcUtils}
+import org.apache.spark.sql.execution.datasources.jdbc.{JDBCRDD, JdbcOptionsInWrite, JdbcUtils}
 import org.apache.spark.sql.jdbc.JdbcDialects
 import org.apache.spark.sql.sources.{BaseRelation, Filter, InsertableRelation, PrunedFilteredScan}
 import org.apache.spark.sql.types._
 
 private[sql] case class GreenplumRelation(
-    parts: Array[Partition], options: GreenplumOptions)(@transient val sparkSession: SparkSession)
+//                                           override val schema: StructType,
+                                          parts: Array[Partition],
+                                          options: GreenplumOptions)
+                                         (@transient val sparkSession: SparkSession)
   extends BaseRelation
-  with PrunedFilteredScan
-  with InsertableRelation {
+    with PrunedFilteredScan
+    with InsertableRelation {
 
   import GreenplumUtils._
 
   override def sqlContext: SQLContext = sparkSession.sqlContext
+
   override val needConversion: Boolean = false
   override val schema: StructType = {
     val tableSchema = JDBCRDD.resolveTable(options)
@@ -67,7 +71,9 @@ private[sql] case class GreenplumRelation(
       if (overwrite) {
         if (options.isTruncate &&
           JdbcUtils.isCascadingTruncateTable(options.url).contains(false)) {
-          JdbcUtils.truncateTable(conn, options)
+          val writeOption = new JdbcOptionsInWrite(options.url,
+            options.tableOrQuery, options.parameters)
+          JdbcUtils.truncateTable(conn, writeOption)
           nonTransactionalCopy(
             if (options.transactionOn) data.coalesce(1) else data.coalesce(maxConns),
             schema, options)
@@ -91,6 +97,6 @@ private[sql] case class GreenplumRelation(
   override def toString: String = {
     val partitioningInfo = if (parts.nonEmpty) s" [numPartitions=${parts.length}]" else ""
     // credentials should not be included in the plan output, table information is sufficient.
-    s"GreenplumRelation(${options.table})" + partitioningInfo
+    s"GreenplumRelation(${options.tableOrQuery})" + partitioningInfo
   }
 }

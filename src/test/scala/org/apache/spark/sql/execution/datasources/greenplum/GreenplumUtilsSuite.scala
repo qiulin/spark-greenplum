@@ -22,18 +22,16 @@ import java.sql.{Connection, Date, SQLException, Timestamp}
 import java.util.TimeZone
 
 import scala.concurrent.TimeoutException
-
 import io.airlift.testing.postgresql.TestingPostgreSqlServer
 import org.mockito.Matchers._
 import org.mockito.Mockito._
 import org.scalatest.mockito.MockitoSugar
 import org.apache.spark.SparkFunSuite
-
 import org.apache.spark.api.java.function.ForeachPartitionFunction
 import org.apache.spark.sql._
 import org.apache.spark.sql.catalyst.expressions.GenericRow
 import org.apache.spark.sql.catalyst.util.CaseInsensitiveMap
-import org.apache.spark.sql.execution.datasources.jdbc.JdbcUtils
+import org.apache.spark.sql.execution.datasources.jdbc.{JdbcOptionsInWrite, JdbcUtils}
 import org.apache.spark.sql.types._
 import org.apache.spark.util.Utils
 
@@ -360,20 +358,22 @@ class GreenplumUtilsSuite extends SparkFunSuite with MockitoSugar {
         val defaultSource = new DefaultSource
         defaultSource.createRelation(sparkSession.sqlContext, SaveMode.Append, options.params, df)
 
-        assert(JdbcUtils.tableExists(conn, options))
+        val writeOption = new JdbcOptionsInWrite(options.url,
+          options.tableOrQuery, options.parameters)
+        assert(JdbcUtils.tableExists(conn, writeOption))
 
         val relation = defaultSource.createRelation(sparkSession.sqlContext, paras)
         relation.asInstanceOf[GreenplumRelation].insert(df, true)
-        assert(JdbcUtils.tableExists(conn, options))
+        assert(JdbcUtils.tableExists(conn, writeOption))
         relation.asInstanceOf[GreenplumRelation].insert(df, false)
-        assert(JdbcUtils.tableExists(conn, options))
+        assert(JdbcUtils.tableExists(conn, writeOption))
         val paras2 = paras ++: Map("transactionOn" -> "true", "truncate" -> "true")
         val relation2 = defaultSource.createRelation(sparkSession.sqlContext, paras2)
         relation2.asInstanceOf[GreenplumRelation].insert(df, true)
         relation2.asInstanceOf[GreenplumRelation].insert(df, false)
         defaultSource.createRelation(sparkSession.sqlContext, SaveMode.Append, paras2, df)
         defaultSource.createRelation(sparkSession.sqlContext, SaveMode.Overwrite, paras2, df)
-        assert(JdbcUtils.tableExists(conn, options))
+        assert(JdbcUtils.tableExists(conn, writeOption))
       } finally {
         GreenplumUtils.closeConnSilent(conn)
       }
@@ -390,9 +390,9 @@ class GreenplumUtilsSuite extends SparkFunSuite with MockitoSugar {
     try {
       val createSchema = s"CREATE SCHEMA IF NOT EXISTS $schema"
       GreenplumUtils.executeStatement(conn, createSchema)
-      f(conn, options.table, options)
+      f(conn, options.tableOrQuery, options)
     } finally {
-      val dropTbl = s"DROP TABLE IF EXISTS ${options.table}"
+      val dropTbl = s"DROP TABLE IF EXISTS ${options.tableOrQuery}"
       val dropSchema = s"DROP SCHEMA IF EXISTS $schema"
       GreenplumUtils.executeStatement(conn, dropTbl)
       GreenplumUtils.executeStatement(conn, dropSchema)

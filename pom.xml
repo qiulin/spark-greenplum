@@ -6,7 +6,7 @@
 
     <groupId>org.apache.spark</groupId>
     <artifactId>spark-greenplum</artifactId>
-    <version>1.0-SNAPSHOT</version>
+    <version>1.1.0-SNAPSHOT</version>
     <packaging>jar</packaging>
 
     <developers>
@@ -34,7 +34,7 @@
         <scala.binary.ver>2.11</scala.binary.ver>
         <scala.ver>2.11.8</scala.ver>
         <scalatest.ver>3.0.3</scalatest.ver>
-        <spark.ver>2.3.3</spark.ver>
+        <spark.ver>2.4.5</spark.ver>
     </properties>
 
     <dependencies>
@@ -53,9 +53,15 @@
         <dependency>
             <groupId>org.postgresql</groupId>
             <artifactId>postgresql</artifactId>
-            <version>${postgresql.ver}</version>
+            <version>42.2.15</version>
             <scope>compile</scope>
         </dependency>
+        <!--        <dependency>-->
+        <!--            <groupId>org.postgresql</groupId>-->
+        <!--            <artifactId>postgresql</artifactId>-->
+        <!--            <version>${postgresql.ver}</version>-->
+        <!--            <scope>compile</scope>-->
+        <!--        </dependency>-->
 
         <!-- https://mvnrepository.com/artifact/org.ostermiller/utils -->
         <dependency>
@@ -126,6 +132,37 @@
             </plugin>
 
             <plugin>
+                <groupId>org.scala-tools</groupId>
+                <artifactId>maven-scala-plugin</artifactId>
+                <version>2.15.2</version>
+                <configuration>
+                    <args>
+                        <arg>
+                            -g:vars
+                        </arg>
+                    </args>
+                    <verbose>true</verbose>
+                </configuration>
+                <executions>
+                    <execution>
+                        <id>scala-compile-first</id>
+                        <phase>process-resources</phase>
+                        <goals>
+                            <goal>compile</goal>
+                        </goals>
+                    </execution>
+                    <execution>
+                        <id>scala-test-compile</id>
+                        <phase>process-test-resources</phase>
+                        <goals>
+                            <goal>testCompile</goal>
+                        </goals>
+                    </execution>
+                </executions>
+            </plugin>
+
+            <!--
+            <plugin>
                 <groupId>net.alchim31.maven</groupId>
                 <artifactId>scala-maven-plugin</artifactId>
                 <version>3.3.1</version>
@@ -174,6 +211,7 @@
                     </javacArgs>
                 </configuration>
             </plugin>
+            -->
 
             <!-- disable surefire -->
             <plugin>
@@ -260,7 +298,7 @@
         <profile>
             <id>spark-2.4</id>
             <properties>
-                <spark.version>2.4.0</spark.version>
+                <spark.version>2.4.5</spark.version>
             </properties>
         </profile>
     </profiles>

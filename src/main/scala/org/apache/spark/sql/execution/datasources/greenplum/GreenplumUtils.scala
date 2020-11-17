@@ -21,19 +21,17 @@ import java.io._
 import java.nio.charset.StandardCharsets
 import java.sql.{Connection, Date, Timestamp}
 import java.util.UUID
-import java.util.concurrent.{TimeoutException, TimeUnit}
+import java.util.concurrent.{TimeUnit, TimeoutException}
 
 import scala.concurrent.Promise
 import scala.concurrent.duration.Duration
 import scala.util.Try
-
 import org.postgresql.copy.CopyManager
 import org.postgresql.core.BaseConnection
-
 import org.apache.spark.SparkEnv
 import org.apache.spark.internal.Logging
 import org.apache.spark.sql.{DataFrame, Row}
-import org.apache.spark.sql.execution.datasources.jdbc.JdbcUtils
+import org.apache.spark.sql.execution.datasources.jdbc.{JDBCOptions, JdbcUtils}
 import org.apache.spark.sql.types._
 import org.apache.spark.util.{LongAccumulator, ThreadUtils, Utils}
 
@@ -63,10 +61,10 @@ object GreenplumUtils extends Logging {
   }
 
   def convertRow(
-      row: Row,
-      length: Int,
-      delimiter: String,
-      valueConverters: Array[(Row, Int) => String]): Array[Byte] = {
+                  row: Row,
+                  length: Int,
+                  delimiter: String,
+                  valueConverters: Array[(Row, Int) => String]): Array[Byte] = {
     var i = 0
     val values = new Array[String](length)
     while (i < length) {
@@ -96,16 +94,16 @@ object GreenplumUtils extends Logging {
    *
    * Copy data to greenplum in a single transaction.
    *
-   * @param df the [[DataFrame]] will be copy to the Greenplum
-   * @param schema the table schema in Greemnplum
+   * @param df      the [[DataFrame]] will be copy to the Greenplum
+   * @param schema  the table schema in Greemnplum
    * @param options Options for the Greenplum data source
    */
   def transactionalCopy(
-      df: DataFrame,
-      schema: StructType,
-      options: GreenplumOptions): Unit = {
+                         df: DataFrame,
+                         schema: StructType,
+                         options: GreenplumOptions): Unit = {
     val randomString = UUID.randomUUID().toString.filterNot(_ == '-')
-    val canonicalTblName = TableNameExtractor.extract(options.table)
+    val canonicalTblName = TableNameExtractor.extract(options.tableOrQuery)
     val schemaPrefix = canonicalTblName.schema.map(_ + ".").getOrElse("")
     val rawTblName = canonicalTblName.rawName
     val suffix = "sparkGpTmp"
@@ -139,11 +137,11 @@ object GreenplumUtils extends Logging {
     val conn2 = JdbcUtils.createConnectionFactory(options)()
     try {
       if (accumulator.value == partNum) {
-        if (tableExists(conn2, options.table)) {
-          JdbcUtils.dropTable(conn2, options.table)
+        if (tableExists(conn2, options.tableOrQuery)) {
+          JdbcUtils.dropTable(conn2, options.tableOrQuery, options)
         }
 
-        val newTableName = s"${options.table}".split("\\.").last
+        val newTableName = s"${options.tableOrQuery}".split("\\.").last
         val renameTempTbl = s"ALTER TABLE $tempTable RENAME TO $newTableName"
         executeStatement(conn2, renameTempTbl)
       } else {
@@ -156,7 +154,7 @@ object GreenplumUtils extends Logging {
       }
     } finally {
       if (tableExists(conn2, tempTable)) {
-        retryingDropTableSilent(conn2, tempTable)
+        retryingDropTableSilent(conn2, tempTable, options)
       }
       closeConnSilent(conn2)
     }
@@ -165,14 +163,14 @@ object GreenplumUtils extends Logging {
   /**
    * Drop the table and retry automatically when exception occurred.
    */
-  def retryingDropTableSilent(conn: Connection, table: String): Unit = {
+  def retryingDropTableSilent(conn: Connection, table: String, option: JDBCOptions): Unit = {
     val dropTmpTableMaxRetry = 3
     var dropTempTableRetryCount = 0
     var dropSuccess = false
 
     while (!dropSuccess && dropTempTableRetryCount < dropTmpTableMaxRetry) {
       try {
-        JdbcUtils.dropTable(conn, table)
+        JdbcUtils.dropTable(conn, table, option)
         dropSuccess = true
       } catch {
         case e: Exception =>
@@ -197,34 +195,34 @@ object GreenplumUtils extends Logging {
    * When transcationOn option is true, we will coalesce the dataFrame to one partition,
    * and the copy operation for each partition is atomic.
    *
-   * @param df the [[DataFrame]] will be copy to the Greenplum
-   * @param schema the table schema in Greemnplum
+   * @param df      the [[DataFrame]] will be copy to the Greenplum
+   * @param schema  the table schema in Greemnplum
    * @param options Options for the Greenplum data source
    */
   def nonTransactionalCopy(
-      df: DataFrame,
-      schema: StructType,
-      options: GreenplumOptions): Unit = {
+                            df: DataFrame,
+                            schema: StructType,
+                            options: GreenplumOptions): Unit = {
     df.foreachPartition { rows =>
-      copyPartition(rows, options, schema, options.table)
+      copyPartition(rows, options, schema, options.tableOrQuery)
     }
   }
 
   /**
    * Copy a partition's data to a gptable.
    *
-   * @param rows rows of a partition will be copy to the Greenplum
-   * @param options Options for the Greenplum data source
-   * @param schema the table schema in Greemnplum
-   * @param tableName the tableName, to which the data will be copy
+   * @param rows        rows of a partition will be copy to the Greenplum
+   * @param options     Options for the Greenplum data source
+   * @param schema      the table schema in Greemnplum
+   * @param tableName   the tableName, to which the data will be copy
    * @param accumulator account for recording the successful partition num
    */
   def copyPartition(
-      rows: Iterator[Row],
-      options: GreenplumOptions,
-      schema: StructType,
-      tableName: String,
-      accumulator: Option[LongAccumulator] = None): Unit = {
+                     rows: Iterator[Row],
+                     options: GreenplumOptions,
+                     schema: StructType,
+                     tableName: String,
+                     accumulator: Option[LongAccumulator] = None): Unit = {
     val valueConverters: Array[(Row, Int) => String] =
       schema.map(s => makeConverter(s.dataType)).toArray
     val tmpDir = Utils.createTempDir(Utils.getLocalDir(SparkEnv.get.conf), "greenplum")
